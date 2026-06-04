@@ -6,6 +6,9 @@ import { initTransformMode } from './ui/transform-mode';
 import { BrowserHandTracker } from './hands/browser-hand-tracker';
 import { HandRenderer } from './hands/hand-renderer';
 import { HandInteraction } from './hands/hand-interaction';
+import { WsHandClient } from './hands/ws-hand-client';
+import type { GestureState } from './hands/ws-hand-client';
+import type { TransformMode } from './objects/selection-manager';
 import { ArLabels } from './scene/ar-labels';
 import { DepthScanner } from './scene/depth-scanner';
 
@@ -44,10 +47,48 @@ async function init() {
   interaction.onPinchMove  = (x, y) =>   objMgr.pinchMove(x, y);
   interaction.onPinchEnd   = ()     => { objMgr.pinchEnd();         renderer.isGrabbing = false; };
 
-  handTracker.onFrame = frame => { renderer.update(frame); interaction.update(frame); };
-  handTracker.onReady = () => {
-    handStatusEl.textContent = '✦ MÃO ATIVA';
+  // ── WebSocket Bridge (Python server) ───────────────────────────
+  let bridgeConnected = false;
+  let lastGesture: GestureState = { pinch: false, fist: false, open: false, ring: false };
+  const TRANSFORM_MODES: TransformMode[] = ['translate', 'rotate', 'scale'];
+
+  const wsClient = new WsHandClient('ws://localhost:8765', frame => {
+    renderer.update(frame);
+    interaction.update(frame);
+  });
+
+  wsClient.onConnect = () => {
+    bridgeConnected = true;
+    handStatusEl.textContent = '✦ BRIDGE ATIVA';
     handStatusEl.style.color = 'rgba(0,255,180,0.7)';
+    renderer.setConnected(true);
+  };
+
+  wsClient.onDisconnect = () => {
+    bridgeConnected = false;
+  };
+
+  wsClient.onGesture = (g) => {
+    if (g.fist && !lastGesture.fist) objMgr.deleteSelected();
+    if (g.open && !lastGesture.open) selMgr.deselect();
+    if (g.ring && !lastGesture.ring && selMgr.selected) {
+      const cur = selMgr.getMode();
+      const next = TRANSFORM_MODES[(TRANSFORM_MODES.indexOf(cur) + 1) % TRANSFORM_MODES.length];
+      selMgr.setMode(next);
+    }
+    lastGesture = g;
+  };
+
+  // BrowserHandTracker: sempre renderiza; só interage quando bridge offline
+  handTracker.onFrame = frame => {
+    renderer.update(frame);
+    if (!bridgeConnected) interaction.update(frame);
+  };
+  handTracker.onReady = () => {
+    if (!bridgeConnected) {
+      handStatusEl.textContent = '✦ MÃO ATIVA';
+      handStatusEl.style.color = 'rgba(0,255,180,0.7)';
+    }
     renderer.setConnected(true);
   };
   handStatusEl.textContent = '◌ CARREGANDO MEDIAPIPE...';
@@ -124,7 +165,7 @@ async function init() {
     console.warn(e);
   });
 
-  statusEl.textContent = 'BIG BANG · Q=SCAN MODE · CLIQUE OBJETO=SCANEAR · PINCH=AÇÃO';
+  statusEl.textContent = 'BIG BANG · Q=SCAN · PINCH=MOVER · FIST=DELETAR · RING=MODO · OPEN=SOLTAR';
 }
 
 init();

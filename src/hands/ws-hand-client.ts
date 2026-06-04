@@ -1,6 +1,7 @@
 export interface Landmark { x: number; y: number; z: number; }
 export interface HandData { label: string; landmarks: Landmark[]; }
-export interface HandFrame { hands: HandData[]; }
+export interface GestureState { pinch: boolean; fist: boolean; open: boolean; ring: boolean; }
+export interface HandFrame { hands: HandData[]; gestures?: GestureState; }
 
 type FrameCallback = (frame: HandFrame) => void;
 
@@ -10,6 +11,7 @@ export class WsHandClient {
   private onFrame: FrameCallback;
   onConnect?: () => void;
   onDisconnect?: () => void;
+  onGesture?: (g: GestureState) => void;
 
   constructor(url: string, onFrame: FrameCallback) {
     this.url = url;
@@ -30,6 +32,7 @@ export class WsHandClient {
         try {
           const frame: HandFrame = JSON.parse(e.data);
           this.onFrame(frame);
+          if (frame.gestures) this.onGesture?.(frame.gestures);
         } catch { /* malformed frame */ }
       };
 

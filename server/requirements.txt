@@ -1,0 +1,8 @@
+mediapipe
+opencv-python
+pynput
+numpy
+scikit-learn
+mss
+ultralytics
+pyautogui
