@@ -71,7 +71,7 @@ export class ObjectManager {
     const hit = this.raycaster.ray.intersectPlane(this.spawnPlane, target);
     const normY = (1 - ndcY) / 2;
     const surface = this.analyzer?.getSurfaceAt((ndcX + 1) / 2, normY);
-    const floorY = surface?.type === 'table' ? 1.0 : 0;
+    const floorY = surface?.floorY ?? 0;
     this.pendingSpawn = hit ? { pos: target.clone(), floorY } : null;
     this.grabbing = false;
   }
@@ -91,11 +91,13 @@ export class ObjectManager {
     if (this.grabbing && this.selMgr?.selected) {
       this.selMgr.selected.userData.baseY = this.selMgr.selected.position.y;
       this.grabbing = false;
+      this.save();
       return;
     }
     if (this.pendingSpawn) {
       this.spawnAt(this.pendingSpawn.pos, this.pendingSpawn.floorY);
       this.pendingSpawn = null;
+      this.save();
     }
   }
 
@@ -123,6 +125,7 @@ export class ObjectManager {
         }
       });
       this.items = this.items.filter(i => i !== item);
+      this.save();
     }
   }
 
@@ -148,11 +151,78 @@ export class ObjectManager {
     });
   }
 
+  // ── Persistence ────────────────────────────────────────────────────
+
+  private static readonly STORAGE_KEY = 'bigbang-scene-v1';
+
+  save(): void {
+    const data = this.items.map(item => ({
+      shape:  item.group.userData.shape as string,
+      px: item.group.position.x, py: item.group.position.y, pz: item.group.position.z,
+      rx: item.group.rotation.x, ry: item.group.rotation.y, rz: item.group.rotation.z,
+      sx: item.group.scale.x, sy: item.group.scale.y, sz: item.group.scale.z,
+      baseY: item.group.userData.baseY as number,
+      floorY: item.floorY,
+    }));
+    localStorage.setItem(ObjectManager.STORAGE_KEY, JSON.stringify(data));
+  }
+
+  load(): void {
+    try {
+      const raw = localStorage.getItem(ObjectManager.STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw) as Array<{
+        shape: ShapeType; px: number; py: number; pz: number;
+        rx: number; ry: number; rz: number;
+        sx: number; sy: number; sz: number;
+        baseY: number; floorY: number;
+      }>;
+      for (const d of data) {
+        const group = createPrimitive(d.shape, new THREE.Vector3(d.px, d.py, d.pz));
+        group.userData.shape  = d.shape;
+        group.userData.baseY  = d.baseY;
+        group.position.set(d.px, d.py, d.pz);
+        group.rotation.set(d.rx, d.ry, d.rz);
+        group.scale.set(d.sx, d.sy, d.sz);
+        const shadow = createContactShadow(this.scene);
+        this.scene.add(group);
+        this.items.push({ group, shadow, floorY: d.floorY });
+      }
+    } catch { /* malformed save — ignore */ }
+  }
+
+  clearSave(): void {
+    localStorage.removeItem(ObjectManager.STORAGE_KEY);
+  }
+
+  // ── Auto-spawn from detection ──────────────────────────────────────
+
+  private static readonly SPAWN_MIN_DIST = 1.2;
+
+  tryAutoSpawn(ndcX: number, ndcY: number, shape: ShapeType, label: string): boolean {
+    this.pointer.set(ndcX, ndcY);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const target = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(this.spawnPlane, target)) return false;
+
+    // Dedup: bail if an object already exists within threshold distance
+    for (const item of this.items) {
+      if (item.group.position.distanceTo(target) < ObjectManager.SPAWN_MIN_DIST) return false;
+    }
+
+    const surface = this.analyzer?.getSurfaceAt((ndcX + 1) / 2, (1 - ndcY) / 2);
+    const floorY  = surface?.floorY ?? 0;
+    this.spawnAt(target, floorY, shape, label);
+    this.save();
+    return true;
+  }
+
   // ── Internal ───────────────────────────────────────────────────────
 
-  private spawnAt(pos: THREE.Vector3, floorY = 0): void {
-    const group = createPrimitive(this.activeShape, new THREE.Vector3(pos.x, floorY, pos.z));
-    group.userData.shape = this.activeShape;
+  private spawnAt(pos: THREE.Vector3, floorY = 0, shape?: ShapeType, _label?: string): void {
+    const useShape = shape ?? this.activeShape;
+    const group = createPrimitive(useShape, new THREE.Vector3(pos.x, floorY, pos.z));
+    group.userData.shape = useShape;
     group.userData.baseY = floorY + 0.6;
     group.position.y = group.userData.baseY;
 
@@ -183,7 +253,7 @@ export class ObjectManager {
     const normX = (ndcX + 1) / 2;
     const normY = (1 - ndcY) / 2;
     const surface = this.analyzer?.getSurfaceAt(normX, normY);
-    const floorY = surface?.type === 'table' ? 1.0 : 0;
+    const floorY = surface?.floorY ?? 0;
 
     this.spawnAt(target, floorY);
   }

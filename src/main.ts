@@ -36,6 +36,10 @@ async function init() {
   initShapeSelector(s => objMgr.setShape(s));
   initTransformMode(selMgr);
 
+  // Restore saved scene
+  objMgr.load();
+  window.addEventListener('beforeunload', () => objMgr.save());
+
   if (cameraOk) scene.initAnalyzers(videoEl);
 
   const segmenter = scene.getSegmenter();
@@ -159,6 +163,35 @@ async function init() {
   setInterval(() => {
     arLabels.updateObjects(scene.getAnalyzer()?.getObjects() ?? []);
   }, 300);
+
+  // ── 3.3 Auto-spawn: COCO-SSD → objeto 3D ─────────────────────────
+  const LABEL_TO_SHAPE: Record<string, 'cube' | 'sphere' | 'cylinder'> = {
+    // Pessoas / animais → esfera
+    person: 'sphere', cat: 'sphere', dog: 'sphere', bird: 'sphere',
+    // Móveis / objetos grandes → cubo
+    chair: 'cube', couch: 'cube', bed: 'cube', toilet: 'cube',
+    'dining table': 'cube', bench: 'cube', laptop: 'cube', tv: 'cube',
+    keyboard: 'cube', book: 'cube', backpack: 'cube', suitcase: 'cube',
+    // Objetos cilíndricos / pequenos
+    bottle: 'cylinder', cup: 'cylinder', vase: 'cylinder',
+    'potted plant': 'cylinder', umbrella: 'cylinder', clock: 'cylinder',
+  };
+
+  setInterval(() => {
+    if (!scanMode) return;
+    const detected = scene.getAnalyzer()?.getObjects() ?? [];
+    for (const obj of detected) {
+      if (obj.score < 0.72) continue;
+      const shape = LABEL_TO_SHAPE[obj.label];
+      if (!shape) continue;
+      // Centro da bbox, espelhado (câmera selfie)
+      const cx   = 1 - (obj.left + obj.right)  / 2;
+      const cy   = (obj.top  + obj.bottom) / 2;
+      const ndcX = cx * 2 - 1;
+      const ndcY = -(cy * 2 - 1);
+      objMgr.tryAutoSpawn(ndcX, ndcY, shape, obj.label);
+    }
+  }, 5000);
 
   // Render loops
   const renderHands  = () => { renderer.render();   requestAnimationFrame(renderHands);  };

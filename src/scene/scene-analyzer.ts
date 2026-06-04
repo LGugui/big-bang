@@ -13,12 +13,20 @@ export interface SurfaceHit {
   type: SurfaceType;
   label?: string;
   confidence: number;
+  floorY: number;  // Y position for object placement
 }
 
-const FLOOR_OBJECTS = new Set(['floor', 'carpet', 'rug', 'ground', 'road', 'pavement']);
-const WALL_OBJECTS  = new Set(['wall', 'door', 'window', 'curtain', 'painting']);
-const TABLE_OBJECTS = new Set(['table', 'desk', 'bench', 'counter', 'shelf', 'bed']);
+const FLOOR_OBJECTS = new Set(['floor', 'carpet', 'rug', 'ground', 'road', 'pavement', 'mat']);
+const WALL_OBJECTS  = new Set(['wall', 'door', 'window', 'curtain', 'painting', 'mirror', 'bookcase']);
+const TABLE_OBJECTS = new Set(['table', 'desk', 'bench', 'counter', 'shelf', 'bed', 'dining table', 'coffee table', 'nightstand', 'countertop']);
 const SKY_OBJECTS   = new Set(['sky', 'ceiling']);
+
+// Height above floor-level for each surface type
+const SURFACE_HEIGHT: Record<string, number> = {
+  table: 1.0, 'dining table': 1.0, desk: 1.0, 'coffee table': 0.55,
+  counter: 0.9, countertop: 0.9, shelf: 1.5, nightstand: 0.75, bench: 0.55, bed: 0.65,
+  floor: 0, carpet: 0, rug: 0, ground: 0,
+};
 
 export class SceneAnalyzer {
   private detector: ObjectDetector | null = null;
@@ -75,21 +83,22 @@ export class SceneAnalyzer {
     // Checar objetos detectados na posição
     for (const obj of this.objects) {
       if (mx >= obj.left && mx <= obj.right && normY >= obj.top && normY <= obj.bottom) {
-        if (obj.label === 'person') return { type: 'person', label: obj.label, confidence: obj.score };
-        if (TABLE_OBJECTS.has(obj.label))  return { type: 'table',  label: obj.label, confidence: obj.score };
-        if (WALL_OBJECTS.has(obj.label))   return { type: 'wall',   label: obj.label, confidence: obj.score };
-        if (FLOOR_OBJECTS.has(obj.label))  return { type: 'floor',  label: obj.label, confidence: obj.score };
-        if (SKY_OBJECTS.has(obj.label))    return { type: 'sky',    label: obj.label, confidence: obj.score };
-        return { type: 'object', label: obj.label, confidence: obj.score };
+        const h = SURFACE_HEIGHT[obj.label] ?? 0;
+        if (obj.label === 'person') return { type: 'person', label: obj.label, confidence: obj.score, floorY: 0 };
+        if (TABLE_OBJECTS.has(obj.label))  return { type: 'table',  label: obj.label, confidence: obj.score, floorY: h };
+        if (WALL_OBJECTS.has(obj.label))   return { type: 'wall',   label: obj.label, confidence: obj.score, floorY: 0 };
+        if (FLOOR_OBJECTS.has(obj.label))  return { type: 'floor',  label: obj.label, confidence: obj.score, floorY: h };
+        if (SKY_OBJECTS.has(obj.label))    return { type: 'sky',    label: obj.label, confidence: obj.score, floorY: 0 };
+        return { type: 'object', label: obj.label, confidence: obj.score, floorY: 0 };
       }
     }
 
     // Heurística por região da tela (sem detector ou fora de bbox)
-    if (normY > 0.72) return { type: 'floor', confidence: 0.6 };
-    if (normY < 0.18) return { type: 'sky',   confidence: 0.5 };
-    if (normX < 0.08 || normX > 0.92) return { type: 'wall', confidence: 0.4 };
+    if (normY > 0.72) return { type: 'floor', confidence: 0.6, floorY: 0 };
+    if (normY < 0.18) return { type: 'sky',   confidence: 0.5, floorY: 0 };
+    if (normX < 0.08 || normX > 0.92) return { type: 'wall', confidence: 0.4, floorY: 0 };
 
-    return { type: 'air', confidence: 0.3 };
+    return { type: 'air', confidence: 0.3, floorY: 0 };
   }
 
   getObjects(): DetectedObject[] { return this.objects; }
