@@ -9,11 +9,13 @@ import { HandInteraction } from './hands/hand-interaction';
 import { WsHandClient } from './hands/ws-hand-client';
 import type { GestureState } from './hands/ws-hand-client';
 import type { TransformMode } from './objects/selection-manager';
+import { FaceRenderer } from './face/face-renderer';
 import { ArLabels } from './scene/ar-labels';
 import { DepthScanner } from './scene/depth-scanner';
 
 const videoEl      = document.getElementById('camera-feed')  as HTMLVideoElement;
 const canvasEl     = document.getElementById('three-canvas') as HTMLCanvasElement;
+const faceCanvasEl = document.getElementById('face-canvas')  as HTMLCanvasElement;
 const handCanvasEl = document.getElementById('hand-canvas')  as HTMLCanvasElement;
 const labelCanvasEl= document.getElementById('label-canvas') as HTMLCanvasElement;
 const statusEl     = document.getElementById('status')       as HTMLDivElement;
@@ -38,6 +40,11 @@ async function init() {
 
   const segmenter = scene.getSegmenter();
 
+  // ── Face tracking ─────────────────────────────────────────────
+  const faceRenderer = new FaceRenderer(faceCanvasEl);
+  const renderFace = () => { faceRenderer.render(); requestAnimationFrame(renderFace); };
+  renderFace();
+
   // ── Hand tracking ──────────────────────────────────────────────
   const handTracker = new BrowserHandTracker(videoEl);
   const renderer    = new HandRenderer(handCanvasEl);
@@ -55,6 +62,7 @@ async function init() {
   const wsClient = new WsHandClient('ws://localhost:8765', frame => {
     renderer.update(frame);
     interaction.update(frame);
+    faceRenderer.update(frame.face ?? null);
   });
 
   wsClient.onConnect = () => {

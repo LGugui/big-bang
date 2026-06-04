@@ -1,7 +1,7 @@
 export interface Landmark { x: number; y: number; z: number; }
 export interface HandData { label: string; landmarks: Landmark[]; }
 export interface GestureState { pinch: boolean; fist: boolean; open: boolean; ring: boolean; }
-export interface HandFrame { hands: HandData[]; gestures?: GestureState; }
+export interface HandFrame { hands: HandData[]; gestures?: GestureState; face?: Landmark[]; }
 
 type FrameCallback = (frame: HandFrame) => void;
 

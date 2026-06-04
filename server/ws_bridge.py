@@ -23,6 +23,13 @@ except ImportError:
 
 from detector import HandDetector
 
+try:
+    from face_detector import FaceDetector
+    _FACE_ENABLED = True
+except Exception:
+    _FACE_ENABLED = False
+    print("[Bridge] FaceDetector indisponível — só mãos.")
+
 PORT = 8765
 
 
@@ -75,23 +82,26 @@ async def handler(ws):
         print(f"[Bridge] Cliente desconectado — {len(clients)} ativo(s)")
 
 
+_FACE_CFG = {
+    "face_detection_confidence": 0.5,
+    "face_tracking_confidence": 0.5,
+}
+
+
 async def camera_loop():
-    detector = HandDetector(CFG)
+    detector  = HandDetector(CFG)
+    face_det  = FaceDetector(_FACE_CFG) if _FACE_ENABLED else None
+    face_tick = 0
 
-    # DirectShow evita conflito com getUserMedia do browser no Windows
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
     if not cap.isOpened():
-        # Fallback sem backend específico
         cap = cv2.VideoCapture(0)
-
     if not cap.isOpened():
         print("[Bridge] ERRO: câmera não disponível.")
         return
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
     print(f"[Bridge] Câmera ativa — enviando para ws://localhost:{PORT}")
 
     try:
@@ -104,6 +114,18 @@ async def camera_loop():
             frame = cv2.flip(frame, 1)
             _, hands = detector.find_hands(frame, draw=False)
 
+            # Face detection every 2nd frame (~30 fps) to keep bridge at 60 fps
+            face_data = None
+            if face_det:
+                face_tick += 1
+                if face_tick % 2 == 0:
+                    lm, _bs, _mat = face_det.find_face(frame)
+                    if lm:
+                        face_data = [
+                            {"x": round(l.x, 4), "y": round(l.y, 4), "z": round(l.z, 4)}
+                            for l in lm
+                        ]
+
             if clients:
                 payload = []
                 for lm, label in hands:
@@ -115,7 +137,10 @@ async def camera_loop():
                         ],
                     })
                 top_gs = gesture_state(hands[0][0]) if hands else _NULL_GESTURES
-                msg = json.dumps({"hands": payload, "gestures": top_gs})
+                msg_obj: dict = {"hands": payload, "gestures": top_gs}
+                if face_data is not None:
+                    msg_obj["face"] = face_data
+                msg = json.dumps(msg_obj)
                 dead = set()
                 for c in clients:
                     try:
@@ -128,6 +153,8 @@ async def camera_loop():
     finally:
         cap.release()
         detector.close()
+        if face_det:
+            face_det.close()
         print("[Bridge] Câmera liberada.")
 
 
